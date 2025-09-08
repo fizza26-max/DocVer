@@ -31,23 +31,29 @@ def load_text2text():
 # -----------------------------
 # Utility: file reading
 # -----------------------------
-import pytesseract
-from PIL import Image
 import fitz  # PyMuPDF
+import easyocr
+from PIL import Image
+
+# load once
+@st.cache_resource
+def load_ocr():
+    return easyocr.Reader(['en'], gpu=False)
 
 def read_pdf(file_bytes: bytes) -> str:
     text_parts = []
     pdf = fitz.open(stream=file_bytes, filetype="pdf")
+    reader = load_ocr()
+
     for page in pdf:
-        # Try normal text extraction first
         text = page.get_text()
         if text.strip():
             text_parts.append(text)
         else:
-            # Fallback: OCR the page as image
+            # OCR fallback
             pix = page.get_pixmap()
             img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-            text_ocr = pytesseract.image_to_string(img)
+            text_ocr = " ".join(reader.readtext(np.array(img), detail=0))
             text_parts.append(text_ocr)
     return "\n".join(text_parts).strip()
 
