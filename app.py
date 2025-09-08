@@ -5,7 +5,6 @@ import time
 from typing import List, Dict, Tuple
 
 import streamlit as st
-import pdfplumber
 from docx import Document as DocxDocument
 from transformers import pipeline
 from pydantic import BaseModel
@@ -79,7 +78,7 @@ def extract_text_from_upload(upload) -> Tuple[str, str]:
 
 
 # -----------------------------
-# Heuristics (only used for explanations)
+# Heuristics + Nudges
 # -----------------------------
 SENSATIONAL_WORDS = {
     "shocking", "unbelievable", "miracle", "cure", "instant", "secret",
@@ -110,17 +109,33 @@ def compute_heuristics(text: str) -> Dict[str, float]:
         "length_chars": len(text),
     }
 
+def nudges_from_heuristics(h: Dict[str, float]) -> List[str]:
+    nudges = []
+    if h["caps_ratio"] > 0.3:
+        nudges.append("Contains unusually high proportion of capital letters.")
+    if h["excess_punct"] > 0.2:
+        nudges.append("Has excessive punctuation (!!! or ???).")
+    if h["sensational"] > 0.2:
+        nudges.append("Uses sensational/trigger words often seen in fake content.")
+    if h["length_chars"] < 50:
+        nudges.append("Text is very short; difficult to verify authenticity.")
+    if not nudges:
+        nudges.append("No obvious red flags detected.")
+    return nudges
+
 
 # -----------------------------
 # Zero-shot classification
 # -----------------------------
 LABELS = ["real", "fake"]
 
-def zero_shot_verdict(zs, text: str) -> str:
+def zero_shot_verdict(zs, text: str) -> Tuple[str, float]:
     if not text.strip():
-        return "fake"
+        return "fake", 0.0
     out = zs(text, LABELS, multi_label=False)
-    return out["labels"][0]
+    label = out["labels"][0]
+    score = out["scores"][0]
+    return label, round(score, 3)
 
 
 # -----------------------------
@@ -159,6 +174,7 @@ def answer_question(t2t, question: str, full_text: str, max_tokens: int = 80) ->
 class Report(BaseModel):
     verdict: str
     heuristics: Dict[str, float]
+    confidence: float
     char_count: int
     timestamp: float
 
@@ -192,13 +208,14 @@ if uploaded:
     if len(text) < 40:
         st.warning("Very little text was extracted. This may affect classification.")
 
-    final_label = zero_shot_verdict(zs, text)
-
+    final_label, confidence = zero_shot_verdict(zs, text)
     heur = compute_heuristics(text)
+    nudges = nudges_from_heuristics(heur)
 
     report = Report(
         verdict=final_label,
         heuristics=heur,
+        confidence=confidence,
         char_count=len(text),
         timestamp=time.time()
     )
@@ -208,8 +225,19 @@ if uploaded:
     st.markdown(f"### {color_map.get(final_label,'')} **{final_label.upper()}**")
 
     if detail_mode:
+        st.write("**Confidence Score:**", confidence)
         st.write("**Heuristics:**")
         st.json(heur)
+        st.write("**Nudges:**")
+        for n in nudges:
+            st.markdown(f"- {n}")
+
+        explanation = (
+            f"The system classified this document as **{final_label.upper()}** "
+            f"with confidence {confidence}. "
+            f"Heuristic signals suggest: {', '.join(nudges)}"
+        )
+        st.info(explanation)
 
     st.download_button(
         label="⬇️ Download verification report (JSON)",
