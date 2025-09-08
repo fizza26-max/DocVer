@@ -12,7 +12,7 @@ import fitz  # PyMuPDF
 import easyocr
 from PIL import Image
 import numpy as np
-import language_tool_python
+from textblob import TextBlob  # ✅ Replaced language_tool_python
 
 st.set_page_config(page_title="Document Verifier Agent", page_icon="🛡️", layout="centered")
 
@@ -30,10 +30,6 @@ def load_text2text():
 @st.cache_resource
 def load_ocr():
     return easyocr.Reader(['en'], gpu=False)
-
-@st.cache_resource
-def load_grammar_tool():
-    return language_tool_python.LanguageTool('en-US')
 
 
 # -----------------------------
@@ -170,16 +166,16 @@ def nudges_from_heuristics(h: Dict[str, float]) -> List[str]:
 
 
 # -----------------------------
-# Legal Quality Check
+# Legal Quality Check (TextBlob)
 # -----------------------------
 def check_legal_document_quality(text: str) -> Dict[str, Any]:
     results = {"grammar_issues": [], "missing_essentials": []}
 
-    # Grammar check
-    tool = load_grammar_tool()
-    matches = tool.check(text)
-    if matches:
-        results["grammar_issues"] = [m.message for m in matches[:5]]
+    # Grammar/spelling check
+    blob = TextBlob(text)
+    corrected = str(blob.correct())
+    if corrected != text:
+        results["grammar_issues"].append("Possible grammar/spelling improvements suggested.")
 
     # Legal essentials
     essentials = ["justice", "respondent", "appellant", "judgment", "date", "civil appeal"]
