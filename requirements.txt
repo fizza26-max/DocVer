@@ -5,3 +5,4 @@ pdfplumber
 python-docx
 pydantic
 easyocr
+pymupdf
