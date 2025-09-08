@@ -6,4 +6,4 @@ python-docx
 pydantic
 easyocr
 pymupdf
-language_tool_python
+gingerit
