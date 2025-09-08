@@ -1,0 +1,6 @@
+streamlit==1.*
+transformers>=4.41
+torch
+pdfplumber
+python-docx
+pydantic
