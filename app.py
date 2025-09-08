@@ -1,21 +1,3 @@
-# -----------------------------
-# Document Verifier Agent (Streamlit)
-# -----------------------------
-# Open-source models used:
-#  - valhalla/distilbart-mnli-12-1  -> zero-shot NLI for Real/Fake/Suspicious
-#  - google/flan-t5-base            -> chat-style Q&A summaries grounded in uploaded text
-#
-# Deployable on Streamlit Community Cloud (no poppler/tesseract required).
-#
-# Suggested requirements.txt:
-# streamlit==1.*
-# transformers>=4.41
-# torch
-# pdfplumber
-# python-docx
-# pydantic
-#
-# -----------------------------
 
 import io
 import re
@@ -49,13 +31,26 @@ def load_text2text():
 # -----------------------------
 # Utility: file reading
 # -----------------------------
+import pytesseract
+from PIL import Image
+import fitz  # PyMuPDF
+
 def read_pdf(file_bytes: bytes) -> str:
     text_parts = []
-    with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
-        for page in pdf.pages:
-            t = page.extract_text() or ""
-            text_parts.append(t)
+    pdf = fitz.open(stream=file_bytes, filetype="pdf")
+    for page in pdf:
+        # Try normal text extraction first
+        text = page.get_text()
+        if text.strip():
+            text_parts.append(text)
+        else:
+            # Fallback: OCR the page as image
+            pix = page.get_pixmap()
+            img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+            text_ocr = pytesseract.image_to_string(img)
+            text_parts.append(text_ocr)
     return "\n".join(text_parts).strip()
+
 
 def read_docx(file_bytes: bytes) -> str:
     with io.BytesIO(file_bytes) as f:
