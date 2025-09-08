@@ -186,27 +186,38 @@ class Report(BaseModel):
 # UI
 # -----------------------------
 st.title("🛡️ Document Verifier Agent")
-st.caption("Upload a PDF, DOCX, or Image. The agent will classify it as Real or Fake.")
 
 with st.sidebar:
     st.header("⚙️ Settings")
+    text_input_mode = st.toggle("Text Input Mode", value=False)
     detail_mode = st.toggle("Explained in detail", value=False)
     enable_discussion = st.toggle("Enable discussion about document", value=False)
-
-uploaded = st.file_uploader("Upload a document", type=["pdf", "docx", "jpg", "jpeg", "png"])
 
 zs = load_zero_shot_classifier()
 t2t = load_text2text()
 
-if uploaded:
-    try:
-        text, kind = extract_text_from_upload(uploaded)
-    except Exception as e:
-        st.error(f"Failed to read file: {e}")
-        st.stop()
+# -----------------------------
+# Main Input Handling
+# -----------------------------
+text = ""
+if text_input_mode:
+    st.subheader("✍️ Enter Text to Verify")
+    text = st.text_area("Paste text here", height=200)
+else:
+    uploaded = st.file_uploader("Upload a document", type=["pdf", "docx", "jpg", "jpeg", "png"])
+    if uploaded:
+        try:
+            text, kind = extract_text_from_upload(uploaded)
+        except Exception as e:
+            st.error(f"Failed to read file: {e}")
+            st.stop()
 
+# -----------------------------
+# Processing
+# -----------------------------
+if text.strip():
     if len(text) < 40:
-        st.warning("Very little text was extracted. This may affect classification.")
+        st.warning("Very little text was provided. This may affect classification.")
 
     final_label, confidence = zero_shot_verdict(zs, text)
     heur = compute_heuristics(text)
@@ -233,7 +244,7 @@ if uploaded:
             st.markdown(f"- {n}")
 
         explanation = (
-            f"The system classified this document as **{final_label.upper()}** "
+            f"The system classified this input as **{final_label.upper()}** "
             f"with confidence {confidence}. "
             f"Heuristic signals suggest: {', '.join(nudges)}"
         )
@@ -251,7 +262,7 @@ if uploaded:
     # -----------------
     if enable_discussion:
         st.markdown("---")
-        st.subheader("💬 Ask about this document")
+        st.subheader("💬 Ask about this input")
         if "chat_history" not in st.session_state:
             st.session_state.chat_history = []
 
@@ -275,4 +286,4 @@ if uploaded:
             st.session_state.chat_history.append(("agent", answer))
             st.rerun()
 else:
-    st.info("Upload a PDF, DOCX, or Image to begin.")
+    st.info("Upload a PDF, DOCX, Image, or enable Text Input Mode to begin.")
