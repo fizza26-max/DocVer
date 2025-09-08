@@ -96,6 +96,24 @@ SUSPICIOUS_PATTERNS = [
     r"unlimited salary",
 ]
 
+# Whitelist of trusted institutions (bias toward real)
+TRUSTED_INSTITUTIONS = [
+    "supreme court of pakistan",
+    "high court",
+    "government of",
+    "ministry of",
+    "university",
+    "board of",
+    "parliament",
+    "president of",
+    "prime minister",
+    "civil appeal",
+    "justice",
+    "respondent",
+    "appellant",
+    "judgment"
+]
+
 def signal_caps_ratio(text: str) -> float:
     letters = [c for c in text if c.isalpha()]
     if not letters: return 0.0
@@ -160,15 +178,15 @@ def zero_shot_verdict(zs, text: str) -> Tuple[str, float]:
     # Heuristic suspicious signals
     susp_score = signal_suspicious(text)
 
-    # Domain knowledge: Legal documents are usually real
-    legal_markers = ["supreme court", "high court", "civil appeal", "justice", "respondent", "appellant", "judgment"]
-    if any(marker in text.lower() for marker in legal_markers):
+    # ✅ Trusted institutions override → Real
+    if any(marker in text.lower() for marker in TRUSTED_INSTITUTIONS):
         return "real", 0.95
 
-    # Adjust verdict if heuristics strongly suggest suspicion
-    if susp_score > 0.5 and base_label != "real":
-        return "suspicious", round(max(base_score, susp_score), 3)
+    # 🚨 Fake employment / residency style docs
+    if susp_score > 0.4 or "certificate of employment" in text.lower():
+        return "fake", 0.95
 
+    # Otherwise return model label
     return base_label, round(base_score, 3)
 
 
