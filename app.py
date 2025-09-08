@@ -40,6 +40,7 @@ def load_grammar_tool():
 # File readers
 # -----------------------------
 def read_pdf(file_bytes: bytes) -> str:
+    """Extract text from PDF, fallback to OCR if no selectable text."""
     text_parts = []
     pdf = fitz.open(stream=file_bytes, filetype="pdf")
     reader = load_ocr()
@@ -49,24 +50,26 @@ def read_pdf(file_bytes: bytes) -> str:
         if text.strip():
             text_parts.append(text)
         else:
+            # Fallback to OCR
             pix = page.get_pixmap()
             img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
             text_ocr = " ".join(reader.readtext(np.array(img), detail=0))
-            text_parts.append(text_ocr)
-    return "\n".join(text_parts).strip()
+            if text_ocr.strip():
+                text_parts.append(text_ocr)
+    return "\n".join(text_parts).strip() or "⚠️ No readable text found in PDF."
 
 
 def read_docx(file_bytes: bytes) -> str:
     with io.BytesIO(file_bytes) as f:
         doc = DocxDocument(f)
-    return "\n".join([p.text for p in doc.paragraphs]).strip()
+    return "\n".join([p.text for p in doc.paragraphs]).strip() or "⚠️ DOCX file contains no text."
 
 
 def read_image(file_bytes: bytes) -> str:
     reader = load_ocr()
     img = Image.open(io.BytesIO(file_bytes))
     text = " ".join(reader.readtext(np.array(img), detail=0))
-    return text.strip()
+    return text.strip() or "⚠️ No readable text found in image."
 
 
 def extract_text_from_upload(upload) -> Tuple[str, str]:
@@ -151,7 +154,7 @@ def compute_heuristics(text: str) -> Dict[str, float]:
 
 def nudges_from_heuristics(h: Dict[str, float]) -> List[str]:
     nudges = []
-    if h["caps_ratio"] > 0.3 and h["length_chars"] < 2000:  # relax for long docs
+    if h["caps_ratio"] > 0.3 and h["length_chars"] < 2000:
         nudges.append("Contains unusually high proportion of capital letters.")
     if h["excess_punct"] > 0.2:
         nudges.append("Has excessive punctuation (!!! or ???).")
@@ -170,14 +173,13 @@ def nudges_from_heuristics(h: Dict[str, float]) -> List[str]:
 # Legal Quality Check
 # -----------------------------
 def check_legal_document_quality(text: str) -> Dict[str, Any]:
-    """Check grammar, spelling, and legal essentials in judicial docs."""
     results = {"grammar_issues": [], "missing_essentials": []}
 
     # Grammar check
     tool = load_grammar_tool()
     matches = tool.check(text)
     if matches:
-        results["grammar_issues"] = [m.message for m in matches[:5]]  # show top 5
+        results["grammar_issues"] = [m.message for m in matches[:5]]
 
     # Legal essentials
     essentials = ["justice", "respondent", "appellant", "judgment", "date", "civil appeal"]
@@ -194,10 +196,9 @@ def check_legal_document_quality(text: str) -> Dict[str, Any]:
 LABELS = ["real", "fake", "suspicious"]
 
 def zero_shot_verdict(zs, text: str) -> Tuple[str, float, Dict[str, Any]]:
-    if not text.strip():
+    if not text.strip() or text.startswith("⚠️"):
         return "fake", 0.0, {}
 
-    # Base classifier with explicit labels
     out = zs(text, LABELS, multi_label=False)
     base_label = out["labels"][0]
     base_score = out["scores"][0]
@@ -297,7 +298,7 @@ else:
 # Processing
 # -----------------------------
 if text.strip():
-    if len(text) < 40:
+    if len(text) < 40 and not text.startswith("⚠️"):
         st.warning("Very little text was provided. This may affect classification.")
 
     final_label, confidence, quality_report = zero_shot_verdict(zs, text)
@@ -343,9 +344,6 @@ if text.strip():
         mime="application/json"
     )
 
-    # -----------------
-    # Chat mode
-    # -----------------
     if enable_discussion:
         st.markdown("---")
         st.subheader("💬 Ask about this input")
@@ -372,4 +370,4 @@ if text.strip():
             st.session_state.chat_history.append(("agent", answer))
             st.rerun()
 else:
-    st.info("Upload a PDF, DOCX, Image, or enable Text Input Mode to begin.")
+    st.info("Upload a PDF, DOCX, or Image to begin.")
