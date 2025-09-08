@@ -78,23 +78,12 @@ def extract_text_from_upload(upload) -> Tuple[str, str]:
 
 
 # -----------------------------
-# Heuristics + Suspicious Rules
+# Heuristics + Nudges
 # -----------------------------
 SENSATIONAL_WORDS = {
     "shocking", "unbelievable", "miracle", "cure", "instant", "secret",
     "exposed", "banned", "leaked", "guaranteed", "breaking", "!!!", "act now"
 }
-
-SUSPICIOUS_PATTERNS = [
-    r"cash in hand",
-    r"permanent residency",
-    r"visa sponsorship",
-    r"issued for any purpose",
-    r"guaranteed job",
-    r"work permit",
-    r"lottery",
-    r"unlimited salary",
-]
 
 def signal_caps_ratio(text: str) -> float:
     letters = [c for c in text if c.isalpha()]
@@ -112,17 +101,11 @@ def signal_sensational(text: str) -> float:
     found = sum(1 for w in SENSATIONAL_WORDS if w in t)
     return min(1.0, found / 6.0)
 
-def signal_suspicious(text: str) -> float:
-    t = text.lower()
-    matches = sum(1 for pat in SUSPICIOUS_PATTERNS if re.search(pat, t))
-    return min(1.0, matches / 3.0)
-
 def compute_heuristics(text: str) -> Dict[str, float]:
     return {
         "caps_ratio": round(signal_caps_ratio(text), 3),
         "excess_punct": round(signal_excess_punct(text), 3),
         "sensational": round(signal_sensational(text), 3),
-        "suspicious": round(signal_suspicious(text), 3),
         "length_chars": len(text),
     }
 
@@ -134,8 +117,6 @@ def nudges_from_heuristics(h: Dict[str, float]) -> List[str]:
         nudges.append("Has excessive punctuation (!!! or ???).")
     if h["sensational"] > 0.2:
         nudges.append("Uses sensational/trigger words often seen in fake content.")
-    if h["suspicious"] > 0.2:
-        nudges.append("Contains suspicious claims (e.g., cash in hand, permanent residency).")
     if h["length_chars"] < 50:
         nudges.append("Text is very short; difficult to verify authenticity.")
     if not nudges:
@@ -144,26 +125,17 @@ def nudges_from_heuristics(h: Dict[str, float]) -> List[str]:
 
 
 # -----------------------------
-# Classification
+# Zero-shot classification
 # -----------------------------
 LABELS = ["real", "fake"]
 
 def zero_shot_verdict(zs, text: str) -> Tuple[str, float]:
     if not text.strip():
         return "fake", 0.0
-
-    # Base classifier
     out = zs(text, LABELS, multi_label=False)
-    base_label = out["labels"][0]
-    base_score = out["scores"][0]
-
-    # Heuristic suspicious signals
-    susp_score = signal_suspicious(text)
-
-    # Adjust verdict
-    if susp_score > 0.3:
-        return "suspicious", round(max(base_score, susp_score), 3)
-    return base_label, round(base_score, 3)
+    label = out["labels"][0]
+    score = out["scores"][0]
+    return label, round(score, 3)
 
 
 # -----------------------------
@@ -260,7 +232,7 @@ if text.strip():
     )
 
     st.subheader("🔍 Result")
-    color_map = {"real": "✅", "fake": "❌", "suspicious": "⚠️"}
+    color_map = {"real": "✅", "fake": "❌"}
     st.markdown(f"### {color_map.get(final_label,'')} **{final_label.upper()}**")
 
     if detail_mode:
