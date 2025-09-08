@@ -385,7 +385,8 @@ if uploaded:
         answer = answer_question(t2t, user_q, text)
         st.session_state.chat_history.append(("user", user_q))
         st.session_state.chat_history.append(("agent", answer))
-        st.experimental_rerun()
+        st.rerun()
+
 
 else:
     st.info("Upload a PDF, DOCX, or TXT to begin. You can also paste raw text below.")
