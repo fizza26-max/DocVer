@@ -2,7 +2,7 @@ import io
 import re
 import json
 import time
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Any
 
 import streamlit as st
 from docx import Document as DocxDocument
@@ -12,6 +12,7 @@ import fitz  # PyMuPDF
 import easyocr
 from PIL import Image
 import numpy as np
+import language_tool_python
 
 st.set_page_config(page_title="Document Verifier Agent", page_icon="🛡️", layout="centered")
 
@@ -29,6 +30,10 @@ def load_text2text():
 @st.cache_resource
 def load_ocr():
     return easyocr.Reader(['en'], gpu=False)
+
+@st.cache_resource
+def load_grammar_tool():
+    return language_tool_python.LanguageTool('en-US')
 
 
 # -----------------------------
@@ -162,32 +167,55 @@ def nudges_from_heuristics(h: Dict[str, float]) -> List[str]:
 
 
 # -----------------------------
+# Legal Quality Check
+# -----------------------------
+def check_legal_document_quality(text: str) -> Dict[str, Any]:
+    """Check grammar, spelling, and legal essentials in judicial docs."""
+    results = {"grammar_issues": [], "missing_essentials": []}
+
+    # Grammar check
+    tool = load_grammar_tool()
+    matches = tool.check(text)
+    if matches:
+        results["grammar_issues"] = [m.message for m in matches[:5]]  # show top 5
+
+    # Legal essentials
+    essentials = ["justice", "respondent", "appellant", "judgment", "date", "civil appeal"]
+    for item in essentials:
+        if item not in text.lower():
+            results["missing_essentials"].append(item)
+
+    return results
+
+
+# -----------------------------
 # Classification
 # -----------------------------
 LABELS = ["real", "fake", "suspicious"]
 
-def zero_shot_verdict(zs, text: str) -> Tuple[str, float]:
+def zero_shot_verdict(zs, text: str) -> Tuple[str, float, Dict[str, Any]]:
     if not text.strip():
-        return "fake", 0.0
+        return "fake", 0.0, {}
 
     # Base classifier with explicit labels
     out = zs(text, LABELS, multi_label=False)
     base_label = out["labels"][0]
     base_score = out["scores"][0]
 
-    # Heuristic suspicious signals
     susp_score = signal_suspicious(text)
 
-    # ✅ Trusted institutions override → Real
+    # ✅ Trusted judicial docs
     if any(marker in text.lower() for marker in TRUSTED_INSTITUTIONS):
-        return "real", 0.95
+        quality_report = check_legal_document_quality(text)
+        if quality_report["missing_essentials"] or quality_report["grammar_issues"]:
+            return "suspicious", 0.7, quality_report
+        return "real", 0.95, quality_report
 
     # 🚨 Fake employment / residency style docs
     if susp_score > 0.4 or "certificate of employment" in text.lower():
-        return "fake", 0.95
+        return "fake", 0.95, {}
 
-    # Otherwise return model label
-    return base_label, round(base_score, 3)
+    return base_label, round(base_score, 3), {}
 
 
 # -----------------------------
@@ -229,6 +257,7 @@ class Report(BaseModel):
     confidence: float
     char_count: int
     timestamp: float
+    quality_report: Dict[str, Any] = {}
 
     def to_json(self) -> str:
         return json.dumps(self.dict(), indent=2)
@@ -271,7 +300,7 @@ if text.strip():
     if len(text) < 40:
         st.warning("Very little text was provided. This may affect classification.")
 
-    final_label, confidence = zero_shot_verdict(zs, text)
+    final_label, confidence, quality_report = zero_shot_verdict(zs, text)
     heur = compute_heuristics(text)
     nudges = nudges_from_heuristics(heur)
 
@@ -280,7 +309,8 @@ if text.strip():
         heuristics=heur,
         confidence=confidence,
         char_count=len(text),
-        timestamp=time.time()
+        timestamp=time.time(),
+        quality_report=quality_report
     )
 
     st.subheader("🔍 Result")
@@ -295,12 +325,16 @@ if text.strip():
         for n in nudges:
             st.markdown(f"- {n}")
 
-        explanation = (
-            f"The system classified this input as **{final_label.upper()}** "
-            f"with confidence {confidence}. "
-            f"Heuristic signals suggest: {', '.join(nudges)}"
-        )
-        st.info(explanation)
+        if quality_report:
+            st.write("**Legal Document Quality Checks:**")
+            if quality_report.get("grammar_issues"):
+                st.warning("Grammar/Spelling Issues:")
+                for g in quality_report["grammar_issues"]:
+                    st.markdown(f"- {g}")
+            if quality_report.get("missing_essentials"):
+                st.error("Missing Essential Legal Elements:")
+                for m in quality_report["missing_essentials"]:
+                    st.markdown(f"- {m}")
 
     st.download_button(
         label="⬇️ Download verification report (JSON)",
